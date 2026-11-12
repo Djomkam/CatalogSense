@@ -1,0 +1,14 @@
+[
+  {
+    "sku": "GL-800", "name": "Touchscreen Gloves", "brand": "Laurentide", "category": "Accessories",
+    "price": 19.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/gl-800.jpg", "version": 2
+  },
+  {
+    "sku": "BP-400", "name": "Daypack 28L", "brand": "Fjordline", "category": "Bags > Backpacks",
+    "price": 89.50, "currency": "CAD", "imageUrl": "https://cdn.example.com/bp-400.jpg", "version": 2
+  },
+  {
+    "sku": "TR-100", "name": "Trail Runner 100 (old price)", "brand": "Northpeak", "category": "Shoes > Running",
+    "price": 99.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/tr-100.jpg", "version": 1
+  }
+]

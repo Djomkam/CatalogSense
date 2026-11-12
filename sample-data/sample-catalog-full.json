@@ -1,0 +1,62 @@
+[
+  {
+    "sku": "TR-100", "name": "Trail Runner 100", "brand": "Northpeak", "category": "Shoes > Running",
+    "price": 129.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/tr-100.jpg", "version": 1,
+    "variants": [
+      { "sku": "TR-100-BLK-9", "color": "Black", "size": "9", "inStock": true },
+      { "sku": "TR-100-BLK-10", "color": "Black", "size": "10", "inStock": true },
+      { "sku": "TR-100-BLU-10", "color": "Blue", "size": "10", "price": 119.99, "inStock": false }
+    ]
+  },
+  {
+    "sku": "TR-200", "name": "Trail Runner 200 GTX", "brand": "Northpeak", "category": "Shoes > Running",
+    "price": 179.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/tr-200.jpg", "version": 1,
+    "variants": [ { "sku": "TR-200-GRY-9", "color": "Grey", "size": "9", "inStock": true } ]
+  },
+  {
+    "sku": "JK-310", "name": "Insulated Winter Parka", "brand": "Laurentide", "category": "Apparel > Jackets",
+    "price": 349.00, "currency": "CAD", "imageUrl": "https://cdn.example.com/jk-310.jpg", "version": 1,
+    "variants": [
+      { "sku": "JK-310-NVY-M", "color": "Navy", "size": "M", "inStock": true },
+      { "sku": "JK-310-NVY-L", "color": "Navy", "size": "L", "inStock": true }
+    ]
+  },
+  {
+    "sku": "JK-320", "name": "Packable Rain Shell", "brand": "Laurentide", "category": "Apparel > Jackets",
+    "price": 149.00, "currency": "CAD", "imageUrl": "http://cdn.example.com/jk-320.jpg", "version": 1,
+    "variants": []
+  },
+  {
+    "sku": "BP-400", "name": "Daypack 28L", "brand": "Fjordline", "category": "Bags > Backpacks",
+    "price": 89.50, "currency": "CAD", "version": 1
+  },
+  {
+    "sku": "BT-500", "name": "Insulated Bottle 750 ml", "brand": "Fjordline", "category": "Accessories",
+    "price": 34.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/bt-500.jpg", "version": 1,
+    "variants": [ { "sku": "BT-500-RED", "color": "Red", "inStock": false } ]
+  },
+  {
+    "sku": "SK-600", "name": "Merino Hiking Socks", "brand": "", "category": "Apparel > Socks",
+    "price": 24.00, "currency": "CAD", "imageUrl": "https://cdn.example.com/sk-600.jpg", "version": 1
+  },
+  {
+    "sku": "HT-700", "name": "Fleece Beanie", "brand": "Laurentide",
+    "price": 29.00, "currency": "cad", "imageUrl": "https://cdn.example.com/ht-700.jpg", "version": 1
+  },
+  {
+    "sku": "GL-800", "name": "Touchscreen Gloves", "brand": "Laurentide", "category": "Accessories",
+    "price": -19.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/gl-800.jpg", "version": 1
+  },
+  {
+    "sku": "TN-900", "name": "2-Person Tent", "brand": "Fjordline", "category": "Camping",
+    "price": 399.00, "currency": "DOLLARS", "imageUrl": "https://cdn.example.com/tn-900.jpg", "version": 1
+  },
+  {
+    "sku": "LT-950", "name": "Headlamp 400 lm", "brand": "Northpeak", "category": "Camping",
+    "price": 59.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/lt-950.jpg", "version": 1
+  },
+  {
+    "sku": "LT-950", "name": "Headlamp 400 lm (duplicate row)", "brand": "Northpeak", "category": "Camping",
+    "price": 54.99, "currency": "CAD", "imageUrl": "https://cdn.example.com/lt-950.jpg", "version": 2
+  }
+]

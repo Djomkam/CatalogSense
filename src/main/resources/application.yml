@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: catalogsense
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/catalogsense}
+    username: ${DB_USER:catalogsense}
+    password: ${DB_PASSWORD:catalogsense}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.batch_size: 100
+      hibernate.order_inserts: true
+  flyway:
+    enabled: true
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
