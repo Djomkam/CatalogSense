@@ -14,14 +14,14 @@ import java.time.Clock;
 @RequiredArgsConstructor
 public class OutboxCleanup {
 
-    private final OutboxEventRepository outbox;
+    private final OutboxEventRepository outboxEventRepository;
     private final OutboxProperties properties;
     private final Clock clock;
 
     @Scheduled(cron = "${catalogsense.outbox.cleanup-cron:0 0 3 * * *}")
     @Transactional
     public int purge() {
-        int deleted = outbox.deletePublishedBefore(clock.instant().minus(properties.retention()));
+        int deleted = outboxEventRepository.deletePublishedBefore(clock.instant().minus(properties.retention()));
         if (deleted > 0) {
             log.info("Outbox cleanup deleted {} published event(s)", deleted);
         }

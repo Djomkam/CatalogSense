@@ -25,13 +25,13 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OutboxWriter {
 
-    private final OutboxEventRepository outbox;
+    private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
 
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
     public void on(ProductsUpsertedEvent event) {
-        outbox.saveAll(event.products().stream()
+        outboxEventRepository.saveAll(event.products().stream()
                 .map(p -> toRow(new ProductEventMessage(UUID.randomUUID().toString(), ProductEventMessage.UPSERTED,
                         p.catalogId(), p.sku(), p.version(), event.occurredAt(), p)))
                 .toList());
@@ -44,7 +44,7 @@ public class OutboxWriter {
                 .map(sku -> toRow(new ProductEventMessage(UUID.randomUUID().toString(), ProductEventMessage.DELETED,
                         event.catalogId(), sku, null, event.occurredAt(), null)))
                 .toList();
-        outbox.saveAll(rows);
+        outboxEventRepository.saveAll(rows);
     }
 
     private OutboxEvent toRow(ProductEventMessage message) {

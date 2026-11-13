@@ -30,15 +30,15 @@ import java.util.concurrent.TimeUnit;
 @ConditionalOnProperty(name = "catalogsense.outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxRelay {
 
-    private final OutboxEventRepository outbox;
+    private final OutboxEventRepository outboxEventRepository;
     private final KafkaTemplate<String, String> kafka;
     private final OutboxProperties properties;
     private final Clock clock;
     private final TransactionTemplate tx;
 
-    public OutboxRelay(OutboxEventRepository outbox, KafkaTemplate<String, String> kafka,
+    public OutboxRelay(OutboxEventRepository outboxEventRepository, KafkaTemplate<String, String> kafka,
                        OutboxProperties properties, Clock clock, PlatformTransactionManager txManager) {
-        this.outbox = outbox;
+        this.outboxEventRepository = outboxEventRepository;
         this.kafka = kafka;
         this.properties = properties;
         this.clock = clock;
@@ -66,7 +66,7 @@ public class OutboxRelay {
     }
 
     private int publishLockedBatch() {
-        List<OutboxEvent> batch = outbox.lockNextBatch(Limit.of(properties.relay().batchSize()));
+        List<OutboxEvent> batch = outboxEventRepository.lockNextBatch(Limit.of(properties.relay().batchSize()));
         int published = 0;
         for (OutboxEvent row : batch) {
             try {
