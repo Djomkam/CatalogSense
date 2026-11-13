@@ -11,13 +11,11 @@ import java.math.BigDecimal;
 @Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @ToString(exclude = "product")
-@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Variant {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Setter(AccessLevel.NONE)
-    @EqualsAndHashCode.Include
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -43,5 +41,25 @@ public class Variant {
         this.size = size;
         this.price = price;
         this.inStock = inStock;
+    }
+
+    /**
+     * Entity identity is the database id. Two unsaved instances (id == null) are never equal,
+     * and the hash code is stable across persist, as recommended for JPA entities.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Variant other)) {
+            return false;
+        }
+        return id != null && id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
     }
 }
