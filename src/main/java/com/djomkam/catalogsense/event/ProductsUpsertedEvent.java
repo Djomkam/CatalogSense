@@ -1,17 +1,16 @@
 package com.djomkam.catalogsense.event;
 
-import com.djomkam.catalogsense.domain.Product;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Domain event emitted when products are upserted into a catalog.
+ * Domain event emitted when products are created or updated in a catalog.
+ * Carries immutable {@link ProductSnapshot}s, never JPA entities.
  */
 public record ProductsUpsertedEvent(
         String catalogId,
-        List<Product> products,
+        List<ProductSnapshot> products,
         Instant occurredAt
 ) {
     public ProductsUpsertedEvent {
