@@ -13,3 +13,6 @@ catalogsense:
   outbox:
     relay:
       enabled: false
+  # Search needs OpenSearch; the search tests turn it on themselves.
+  search:
+    enabled: false
