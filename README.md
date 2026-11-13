@@ -1,6 +1,6 @@
 # CatalogSense
 
-CatalogSense ingests merchant product catalogs, checks their quality, publishes every change to Kafka and (from phase 3 on) makes them searchable.
+CatalogSense ingests merchant product catalogs, checks their quality, publishes every change to Kafka and makes the catalog searchable in OpenSearch.
 
 Commerce search is only as good as the product data behind it. A missing price, a broken image or a duplicate SKU means a product that shoppers can't find or can't buy. CatalogSense catches these problems at ingestion time and gives the merchant a **Data Health** view with clear, fixable messages.
 
@@ -71,13 +71,53 @@ Message format (value is JSON, headers `eventType` and `eventId`):
 
 A `ProductDeleted` message has the same shape with `product: null`.
 
+### Phase 3: search (OpenSearch indexer and `/search`)
+
+A Kafka consumer reads the product events and keeps an OpenSearch index in sync. PostgreSQL stays the source of truth; the index is a read model built for shoppers.
+
+```mermaid
+flowchart LR
+    K[[catalogsense.product-events]] --> C[Search indexer<br/>Kafka consumer]
+    C -->|index, version_type=external| OS[(OpenSearch<br/>catalogsense-products)]
+    C -->|after 3 retries| DLT[[product-events.DLT]]
+    DB[(PostgreSQL)] -->|POST /search/reindex| OS
+    S[Shopper] -->|GET /search| API[Search API] --> OS
+```
+
+**Indexing**
+
+- **Idempotent and order-safe:** documents are written with OpenSearch *external versioning*, using the product's own `version`. A duplicate or late message is refused with a 409 and skipped, so at-least-once delivery can never put old data back.
+- **Retries, then a dead-letter topic:** if OpenSearch is down, a message is retried 3 times, then parked on `catalogsense.product-events.DLT` with the error in its headers, so one bad message never blocks a partition. Unreadable JSON goes straight to the DLT.
+- **Mapping:** strict (no guessed fields). Names use a `lowercase + asciifolding` analyzer, so "echarpe" finds "Écharpe". Brand, category and colors are keywords for facets, with a `.text` sub-field for full-text search. Variant colors and sizes are copied up to the product so they can be facets.
+- **Backfill:** `POST /api/catalogs/{id}/search/reindex` rebuilds a catalog from PostgreSQL in bulk pages of 500 (products stored before the indexer existed, a mapping change, or a repair).
+
+**Searching**
+
+- **Typo tolerance:** `multi_match` over name (x3), brand (x2), category and colors with `fuzziness: AUTO`, so "jakcet" finds "jacket".
+- **In-stock boost:** in-stock products score higher and rank first, but sold-out products are still shown.
+- **Facets:** brand, category, color and size counts, plus the min and max price for a slider. Facet selections go in `post_filter`, and each facet's counts apply every *other* selection (disjunctive faceting). Picking brand "Acme" narrows the hits and the color counts, while the brand list still shows the other brands so the shopper can add one.
+- **Sorting:** relevance (default), `PRICE_ASC`, `PRICE_DESC`, `NEWEST`, always with the SKU as a tie-break so pages are stable.
+
+```bash
+curl 'localhost:8080/api/catalogs/demo/search?q=jakcet&color=Navy&inStock=true&sort=PRICE_ASC'
+```
+
+```json
+{
+  "total": 1, "page": 0, "pageSize": 20,
+  "hits": [{ "sku": "JK-310", "name": "Insulated Winter Parka", "brand": "Laurentide", "price": 349.00, "inStock": true, "score": 3.1 }],
+  "facets": { "brand": [{ "value": "Laurentide", "count": 1 }], "color": [{ "value": "Navy", "count": 1 }], "...": [] },
+  "priceRange": { "min": 349.00, "max": 349.00 }
+}
+```
+
 ## Run it
 
 Requirements: Docker, or Java 21 + Maven + a local PostgreSQL.
 
 ```bash
-docker compose up --build       # PostgreSQL + Kafka + the app on http://localhost:8080
-./demo.sh                       # full load, health check, fix, health again
+docker compose up --build       # PostgreSQL + Kafka + OpenSearch + the app on http://localhost:8080
+./demo.sh                       # full load, health check, fix, health again, then search
 ```
 
 API docs: http://localhost:8080/swagger-ui.html
@@ -93,7 +133,7 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
 Run the tests:
 
 ```bash
-mvn verify      # unit + Spring integration tests; Kafka tests use an embedded broker, the PostgreSQL test uses Testcontainers when Docker is available
+mvn verify      # unit + Spring integration tests; Kafka tests use an embedded broker; the PostgreSQL and OpenSearch tests use Testcontainers when Docker is available
 ```
 
 ## API
@@ -106,6 +146,8 @@ mvn verify      # unit + Spring integration tests; Kafka tests use an embedded b
 | `GET` | `/api/catalogs/{catalogId}/products/{sku}` | One product with its variants |
 | `GET` | `/api/catalogs/{catalogId}/health` | Health score and issue counts per rule |
 | `GET` | `/api/catalogs/{catalogId}/health/issues?severity=ERROR` | Issues to fix, newest first |
+| `GET` | `/api/catalogs/{catalogId}/search?q=&brand=&category=&color=&size=&inStock=&minPrice=&maxPrice=&sort=&page=&pageSize=` | Search with facets (repeat a facet parameter to select several values) |
+| `POST` | `/api/catalogs/{catalogId}/search/reindex` | Rebuild the catalog's search documents from PostgreSQL |
 
 Example product:
 
@@ -145,11 +187,11 @@ Adding a rule = one Spring `@Component` implementing `ValidationRule`.
 - [x] Phase 1: ingestion API, versioning, Data Health, tests, Docker Compose
 - [ ] CI: a GitHub Actions workflow is ready in `.github/workflows-disabled/`; move it to `.github/workflows/` to turn it on
 - [x] Phase 2: product change events on Kafka through a transactional outbox (at-least-once, ordered per product)
-- [ ] Phase 3: OpenSearch indexer consuming the product events, and a `/search` endpoint with facets, typo tolerance and an in-stock boost
+- [x] Phase 3: OpenSearch indexer consuming the product events, and a `/search` endpoint with facets, typo tolerance and an in-stock boost
 - [ ] Phase 4: React + TypeScript UI with a search page and a Data Health dashboard
 - [ ] Phase 5: Shopify connector (Admin GraphQL bulk export + `products/update` webhooks with HMAC verification)
 - [ ] Phase 6: "Ask the catalog": natural-language questions answered from search results (RAG)
 
 ## Stack
 
-Java 21, Spring Boot 3.4, Spring Data JPA, PostgreSQL 16, Flyway, Apache Kafka (spring-kafka), JUnit 5, Testcontainers, Docker, GitHub Actions.
+Java 21, Spring Boot 3.4, Spring Data JPA, PostgreSQL 16, Flyway, Apache Kafka (spring-kafka), OpenSearch 2 (opensearch-java), JUnit 5, Testcontainers, Docker, GitHub Actions.

@@ -31,6 +31,8 @@ import static org.awaitility.Awaitility.await;
 
 /** End to end: ingestion -> outbox -> relay -> Kafka, against an in-memory broker (no Docker needed). */
 @SpringBootTest(properties = {
+        // Own database: other test contexts leave unpublished outbox rows in the shared one.
+        "spring.datasource.url=jdbc:h2:mem:relaytest;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
         "spring.kafka.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.auto-create=true",
         "catalogsense.outbox.relay.enabled=true",

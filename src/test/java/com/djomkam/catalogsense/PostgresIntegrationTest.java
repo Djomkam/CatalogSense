@@ -17,7 +17,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Runs the Flyway migration and an ingestion against a real PostgreSQL. Skipped when Docker is not available. */
-@SpringBootTest
+@SpringBootTest(properties = "catalogsense.search.enabled=false")
 @Testcontainers(disabledWithoutDocker = true)
 class PostgresIntegrationTest {
 

@@ -18,3 +18,10 @@ curl -s -X PATCH "$BASE/products" -H 'Content-Type: application/json' --data @sa
 
 echo "== 5. Health after the fix"
 curl -s "$BASE/health" | j
+
+echo "== 6. Search with a typo, facets and the in-stock boost (the indexer needs a moment)"
+sleep 2
+curl -s "$BASE/search?q=jakcet" | j
+
+echo "== 7. Narrow by brand: the brand facet still lists the other brands"
+curl -s "$BASE/search?brand=Laurentide&sort=PRICE_ASC" | j
