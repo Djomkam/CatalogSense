@@ -14,6 +14,11 @@ spring:
       hibernate.order_inserts: true
   flyway:
     enabled: true
+  data:
+    web:
+      pageable:
+        # Stable page JSON: {"content": [...], "page": {"size", "number", "totalElements", "totalPages"}}
+        serialization-mode: via-dto
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
     producer:
@@ -24,6 +29,10 @@ spring:
         enable.idempotence: true
         delivery.timeout.ms: 10000
         request.timeout.ms: 5000
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 catalogsense:
   outbox:
@@ -35,6 +44,14 @@ catalogsense:
       batch-size: 100
       poll-interval: 500ms
       send-timeout: 10s
+  search:
+    enabled: true
+    url: ${OPENSEARCH_URL:http://localhost:9200}
+    index-alias: catalogsense-products   # alias over catalogsense-products-v1, -v2, ... (swapped by a reindex)
+    consumer:
+      group-id: catalogsense-search-indexer
+      retries: 3
+      retry-backoff: 1s
 
 server:
   port: 8080

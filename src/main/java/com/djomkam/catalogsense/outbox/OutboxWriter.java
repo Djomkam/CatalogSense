@@ -1,5 +1,6 @@
 package com.djomkam.catalogsense.outbox;
 
+import com.djomkam.catalogsense.event.ProductEventMessage;
 import com.djomkam.catalogsense.event.ProductsDeletedEvent;
 import com.djomkam.catalogsense.event.ProductsUpsertedEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -9,9 +10,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.UUID;
 
 /**
  * Turns domain events into outbox rows, inside the ingestion transaction.
@@ -30,27 +28,24 @@ public class OutboxWriter {
 
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
-    public void on(ProductsUpsertedEvent event) {
+    public void onProductsUpserted(ProductsUpsertedEvent event) {
         outboxEventRepository.saveAll(event.products().stream()
-                .map(p -> toRow(new ProductEventMessage(UUID.randomUUID().toString(), ProductEventMessage.UPSERTED,
-                        p.catalogId(), p.sku(), p.version(), event.occurredAt(), p)))
+                .map(product -> toOutboxEvent(ProductEventMessage.upserted(product, event.occurredAt())))
                 .toList());
     }
 
+    /** SKUs are sorted so the rows (and the Kafka messages) come out in a stable order. */
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
-    public void on(ProductsDeletedEvent event) {
-        List<OutboxEvent> rows = event.skus().stream().sorted()
-                .map(sku -> toRow(new ProductEventMessage(UUID.randomUUID().toString(), ProductEventMessage.DELETED,
-                        event.catalogId(), sku, null, event.occurredAt(), null)))
-                .toList();
-        outboxEventRepository.saveAll(rows);
+    public void onProductsDeleted(ProductsDeletedEvent event) {
+        outboxEventRepository.saveAll(event.skus().stream().sorted()
+                .map(sku -> toOutboxEvent(ProductEventMessage.deleted(event.catalogId(), sku, event.occurredAt())))
+                .toList());
     }
 
-    private OutboxEvent toRow(ProductEventMessage message) {
+    private OutboxEvent toOutboxEvent(ProductEventMessage message) {
         try {
-            return new OutboxEvent(message.eventId(), message.type(), message.catalogId(),
-                    ProductEventMessage.key(message.catalogId(), message.sku()),
+            return new OutboxEvent(message.eventId(), message.type(), message.catalogId(), message.key(),
                     objectMapper.writeValueAsString(message), message.occurredAt());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Could not serialize outbox event " + message.eventId(), e);

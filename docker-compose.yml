@@ -33,6 +33,20 @@ services:
       interval: 5s
       retries: 20
 
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"     # local development only
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health > /dev/null"]
+      interval: 5s
+      retries: 30
+
   app:
     build: .
     depends_on:
@@ -40,10 +54,12 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      opensearch:
+        condition: service_healthy
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/catalogsense
       KAFKA_BOOTSTRAP: kafka:29092
+      OPENSEARCH_URL: http://opensearch:9200
     ports:
       - "8080:8080"
 
-  # Phase 3: opensearch (search index) will be added here.

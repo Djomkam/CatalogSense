@@ -20,7 +20,7 @@ public class OutboxCleanup {
 
     @Scheduled(cron = "${catalogsense.outbox.cleanup-cron:0 0 3 * * *}")
     @Transactional
-    public int purge() {
+    public int deleteExpiredPublishedEvents() {
         int deleted = outboxEventRepository.deletePublishedBefore(clock.instant().minus(properties.retention()));
         if (deleted > 0) {
             log.info("Outbox cleanup deleted {} published event(s)", deleted);

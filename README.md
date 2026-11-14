@@ -1,6 +1,6 @@
 # CatalogSense
 
-CatalogSense ingests merchant product catalogs, checks their quality, publishes every change to Kafka and (from phase 3 on) makes them searchable.
+CatalogSense ingests merchant product catalogs, checks their quality, publishes every change to Kafka and makes the catalog searchable in OpenSearch.
 
 Commerce search is only as good as the product data behind it. A missing price, a broken image or a duplicate SKU means a product that shoppers can't find or can't buy. CatalogSense catches these problems at ingestion time and gives the merchant a **Data Health** view with clear, fixable messages.
 
@@ -71,13 +71,68 @@ Message format (value is JSON, headers `eventType` and `eventId`):
 
 A `ProductDeleted` message has the same shape with `product: null`.
 
+### Phase 3: search (OpenSearch indexer and `/search`)
+
+A Kafka consumer reads the product events and keeps an OpenSearch index in sync. PostgreSQL stays the source of truth; the index is a read model built for shoppers.
+
+```mermaid
+flowchart LR
+    K[[catalogsense.product-events]] --> C[Search indexer<br/>Kafka consumer]
+    C -->|index, version_type=external| A{{alias<br/>catalogsense-products}}
+    A --> OS[(OpenSearch<br/>catalogsense-products-v1)]
+    C -->|after 3 retries| DLT[[product-events.DLT]]
+    DB[(PostgreSQL)] -->|POST /api/search/reindex<br/>builds -v2, then swaps the alias| A
+    S[Shopper] -->|GET /search| API[Search API] --> A
+```
+
+**Indexing**
+
+- **Idempotent and order-safe:** documents are written with OpenSearch *external versioning*, using the product's own `version`. A duplicate or late message is refused with a 409 and skipped, so at-least-once delivery can never put old data back.
+- **Retries, then a dead-letter topic:** if OpenSearch is down, a message is retried 3 times, then parked on `catalogsense.product-events.DLT` with the error in its headers, so one bad message never blocks a partition. Unreadable JSON goes straight to the DLT.
+- **Mapping:** strict (no guessed fields), kept as plain JSON in [`opensearch/product-index.json`](src/main/resources/opensearch/product-index.json). Names use a `lowercase + asciifolding` analyzer, so "echarpe" finds "Écharpe". Brand, category and colors are keywords for facets, with a `.text` sub-field for full-text search. Variant colors and sizes are copied up to the product so they can be facets.
+- **Alias over versioned indexes:** the app only uses the alias `catalogsense-products`, which points at one physical index (`catalogsense-products-v1`, then `-v2`, ...). The first index and the alias are created at startup.
+- **Rebuild without downtime:** `POST /api/search/reindex` starts a background job and answers `202 Accepted` with a job to poll (`GET /api/search/reindex/{jobId}`). The job:
+  1. pauses the search consumer (events wait in Kafka),
+  2. creates the next index version,
+  3. copies every product from PostgreSQL in pages of 500, paging by id (`id > lastId`) with one short read-only transaction per page,
+  4. moves the alias to the new index and deletes the old one in one atomic request,
+  5. resumes the consumer, whose queued events are applied to the new index (external versioning skips what the copy already has).
+
+  Because the new index holds only what PostgreSQL holds, documents of deleted products disappear. And because the consumer is paused, a product deleted during the rebuild can't come back: its delete event is applied after the switch. If OpenSearch rejects any product, the alias is not moved and the old index stays live.
+
+  *Trade-off:* the rebuild covers every catalog (they share one index) rather than repairing one catalog. That's simpler and removes orphans everywhere, at the cost of copying the whole catalog set, which is fine for an occasional admin operation. Pausing only stops the consumer in the instance that runs the job, so with several app instances, run the reindex while only one indexer is running. Job state lives in memory: a restart loses it, which is safe because the alias only moves at the end.
+- **Code layout:** `search.indexing` holds the write side (consumer, indexer, index and alias management, reindex) and `search.query` the read side (criteria, facets, query building, `/search`). Shared pieces (client config, document, field names, errors) stay in `search`.
+
+> Upgrading from an earlier phase 3 build that created a plain `catalogsense-products` index: delete it once (`curl -X DELETE localhost:9200/catalogsense-products`), restart the app, then run `POST /api/search/reindex`.
+
+**Searching**
+
+- **Typo tolerance:** `multi_match` over name (x3), brand (x2), category and colors with `fuzziness: AUTO`, so "jakcet" finds "jacket".
+- **In-stock boost:** in-stock products score higher and rank first, but sold-out products are still shown.
+- **Facets:** brand, category, color and size counts (one `Facet` enum drives the filter, the aggregation and the response), plus the min and max price for a slider. Facet selections go in `post_filter`, and each facet's counts apply every *other* selection (disjunctive faceting). Picking brand "Acme" narrows the hits and the color counts, while the brand list still shows the other brands so the shopper can add one.
+- **Sorting:** relevance (default), `PRICE_ASC`, `PRICE_DESC`, `NEWEST`, always with the SKU as a tie-break so pages are stable.
+- **OpenSearch down:** `/search` answers `503 Search unavailable`; ingestion and the event pipeline keep working.
+
+```bash
+curl 'localhost:8080/api/catalogs/demo/search?q=jakcet&color=Navy&inStock=true&sort=PRICE_ASC'
+```
+
+```json
+{
+  "total": 1, "page": 0, "pageSize": 20,
+  "hits": [{ "sku": "JK-310", "name": "Insulated Winter Parka", "brand": "Laurentide", "price": 349.00, "inStock": true, "score": 3.1 }],
+  "facets": { "brand": [{ "value": "Laurentide", "count": 1 }], "color": [{ "value": "Navy", "count": 1 }], "...": [] },
+  "priceRange": { "min": 349.00, "max": 349.00 }
+}
+```
+
 ## Run it
 
 Requirements: Docker, or Java 21 + Maven + a local PostgreSQL.
 
 ```bash
-docker compose up --build       # PostgreSQL + Kafka + the app on http://localhost:8080
-./demo.sh                       # full load, health check, fix, health again
+docker compose up --build       # PostgreSQL + Kafka + OpenSearch + the app on http://localhost:8080
+./demo.sh                       # full load, health check, fix, health again, then search
 ```
 
 API docs: http://localhost:8080/swagger-ui.html
@@ -93,7 +148,7 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
 Run the tests:
 
 ```bash
-mvn verify      # unit + Spring integration tests; Kafka tests use an embedded broker, the PostgreSQL test uses Testcontainers when Docker is available
+mvn verify      # unit + Spring integration tests; Kafka tests use an embedded broker; the PostgreSQL and OpenSearch tests use Testcontainers when Docker is available
 ```
 
 ## API
@@ -105,7 +160,22 @@ mvn verify      # unit + Spring integration tests; Kafka tests use an embedded b
 | `GET` | `/api/catalogs/{catalogId}/products?page=&size=` | List products |
 | `GET` | `/api/catalogs/{catalogId}/products/{sku}` | One product with its variants |
 | `GET` | `/api/catalogs/{catalogId}/health` | Health score and issue counts per rule |
-| `GET` | `/api/catalogs/{catalogId}/health/issues?severity=ERROR` | Issues to fix, newest first |
+| `GET` | `/api/catalogs/{catalogId}/health/issues?rule=&severity=&page=&size=` | Issues to fix, newest first (both filters optional) |
+| `GET` | `/api/catalogs/{catalogId}/search?q=&brand=&category=&color=&size=&inStock=&minPrice=&maxPrice=&sort=&page=&pageSize=` | Search with facets (repeat a facet parameter to select several values) |
+| `POST` | `/api/search/reindex` | Rebuild the search index from PostgreSQL in the background (`202`, returns a job) |
+| `GET` | `/api/search/reindex/{jobId}` | Progress of a reindex job |
+
+Responses at a glance:
+
+- **Ingestion report** (`PUT`/`PATCH`): `received`, `accepted`, `rejected`, `skippedStale`, `deleted`, `acceptedWithWarnings`, `mode` (`FULL` or `PARTIAL`) and the `rejections` with their reasons.
+- **Health summary**: `productCount` (products stored), `skusTracked`, `skusWithErrors`, `skusWithWarnings`, `score` (0-100) and `issuesByRule` (`rule`, `severity`, `count`).
+- **Pages** (product list, health issues) have a stable shape:
+
+```json
+{ "content": [ ... ], "page": { "size": 20, "number": 0, "totalElements": 8, "totalPages": 1 } }
+```
+
+- **Errors** are RFC 9457 problem details (`application/problem+json`): 400 for a bad parameter or body, 404, 413 for a batch over 10,000 products, 503 when search is down, and a generic 500 (details only in the logs) for anything unexpected.
 
 Example product:
 
@@ -130,10 +200,24 @@ Example product:
 | `VARIANTS` | WARNING | every variant out of stock |
 | `DUPLICATE_SKU` | ERROR | the same SKU sent twice in one batch |
 
-Adding a rule = one Spring `@Component` implementing `ValidationRule`.
+Adding a rule = one Spring `@Component` implementing `ValidationRule`, with a new `RuleId` and an `@Order` (so violations are always listed in the same order). Rules see the payload after normalization (trimmed name, uppercase currency, missing `inStock` = in stock), the same values that get stored.
 
 ## Design choices
 
+- **Code layout, by feature:**
+
+  | Package | What's in it |
+  | --- | --- |
+  | `catalog` | `Product` and `Variant` entities, `ProductData` (what a product is created or updated with), product read API, the shared `@CatalogId` constraint |
+  | `ingestion` | `PUT`/`PATCH` intake: payload DTOs and their normalization, the pure `ProductEvaluator` with its `BatchContext` and sealed `ProductOutcome`, `IngestionService`, the ingestion report and metrics |
+  | `ingestion.validation` | the Data Health rules (strategy pattern), `Violation`, `RuleId` |
+  | `health` | `HealthIssue` rows, the health score and summary, the issues API |
+  | `event` | the product events and the Kafka message contract (`ProductEventMessage`, `ProductEventType`) |
+  | `outbox` | transactional outbox writer, relay and cleanup |
+  | `search` | OpenSearch read model (`search.indexing`, `search.query`) |
+  | `config` | clock and API error handling |
+
+  Dependencies point one way, with no cycles: `ingestion` uses `catalog`, `health` and `event`; `health` and `event` use `catalog`; `outbox` uses `event`; `search` uses `event` and `catalog`; `config` uses `search` (for the 503). The domain (`catalog`) knows nothing about the request format.
 - **Bad data is input, not an exception.** Products are not bean-validated into a 400; each problem becomes a `health_issue` with a message the merchant can act on. Only a malformed request (not a JSON array, too many products) returns 400/413.
 - **A rejected update never destroys good data.** The previous accepted version stays live and the error shows in Data Health.
 - **Idempotent, order-safe updates** through the `version` field, so the same batch can be retried safely.
@@ -145,11 +229,11 @@ Adding a rule = one Spring `@Component` implementing `ValidationRule`.
 - [x] Phase 1: ingestion API, versioning, Data Health, tests, Docker Compose
 - [ ] CI: a GitHub Actions workflow is ready in `.github/workflows-disabled/`; move it to `.github/workflows/` to turn it on
 - [x] Phase 2: product change events on Kafka through a transactional outbox (at-least-once, ordered per product)
-- [ ] Phase 3: OpenSearch indexer consuming the product events, and a `/search` endpoint with facets, typo tolerance and an in-stock boost
+- [x] Phase 3: OpenSearch indexer consuming the product events, and a `/search` endpoint with facets, typo tolerance and an in-stock boost
 - [ ] Phase 4: React + TypeScript UI with a search page and a Data Health dashboard
 - [ ] Phase 5: Shopify connector (Admin GraphQL bulk export + `products/update` webhooks with HMAC verification)
 - [ ] Phase 6: "Ask the catalog": natural-language questions answered from search results (RAG)
 
 ## Stack
 
-Java 21, Spring Boot 3.4, Spring Data JPA, PostgreSQL 16, Flyway, Apache Kafka (spring-kafka), JUnit 5, Testcontainers, Docker, GitHub Actions.
+Java 21, Spring Boot 3.4, Spring Data JPA, PostgreSQL 16, Flyway, Apache Kafka (spring-kafka), OpenSearch 2 (opensearch-java), JUnit 5, Testcontainers, Docker, GitHub Actions.

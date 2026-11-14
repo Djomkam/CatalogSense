@@ -1,7 +1,7 @@
 package com.djomkam.catalogsense.event;
 
-import com.djomkam.catalogsense.domain.Product;
-import com.djomkam.catalogsense.domain.Variant;
+import com.djomkam.catalogsense.catalog.Product;
+import com.djomkam.catalogsense.catalog.Variant;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -35,15 +35,17 @@ public record ProductSnapshot(
 
     public record VariantSnapshot(String sku, String color, String size, BigDecimal price, boolean inStock) {
 
-        static VariantSnapshot of(Variant v) {
-            return new VariantSnapshot(v.getSku(), v.getColor(), v.getSize(), v.getPrice(), v.isInStock());
+        static VariantSnapshot of(Variant variant) {
+            return new VariantSnapshot(variant.getSku(), variant.getColor(), variant.getSize(), variant.getPrice(),
+                    variant.isInStock());
         }
     }
 
     /** Must be called while the persistence context is open, since it reads the variants. */
-    public static ProductSnapshot of(Product p) {
-        return new ProductSnapshot(p.getCatalogId(), p.getSku(), p.getName(), p.getBrand(), p.getCategory(),
-                p.getPrice(), p.getCurrency(), p.getImageUrl(), p.getVersion(), p.isInStock(), p.getUpdatedAt(),
-                p.getVariants().stream().map(VariantSnapshot::of).toList());
+    public static ProductSnapshot of(Product product) {
+        return new ProductSnapshot(product.getCatalogId(), product.getSku(), product.getName(), product.getBrand(),
+                product.getCategory(), product.getPrice(), product.getCurrency(), product.getImageUrl(),
+                product.getVersion(), product.isInStock(), product.getUpdatedAt(),
+                product.getVariants().stream().map(VariantSnapshot::of).toList());
     }
 }
