@@ -17,13 +17,11 @@ import java.util.Locale;
 @Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @ToString(exclude = "variants")
-@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Product {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Setter(AccessLevel.NONE)
-    @EqualsAndHashCode.Include
     private Long id;
 
     @Column(name = "catalog_id", nullable = false)
@@ -98,5 +96,25 @@ public class Product {
 
     public boolean isInStock() {
         return variants.isEmpty() || variants.stream().anyMatch(Variant::isInStock);
+    }
+
+    /**
+     * Entity identity is the database id. Two unsaved instances (id == null) are never equal,
+     * and the hash code is stable across persist, as recommended for JPA entities.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Product other)) {
+            return false;
+        }
+        return id != null && id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
     }
 }

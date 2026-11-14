@@ -14,6 +14,27 @@ spring:
       hibernate.order_inserts: true
   flyway:
     enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        delivery.timeout.ms: 10000
+        request.timeout.ms: 5000
+
+catalogsense:
+  outbox:
+    topic: catalogsense.product-events
+    partitions: 3
+    retention: 7d
+    relay:
+      enabled: true
+      batch-size: 100
+      poll-interval: 500ms
+      send-timeout: 10s
 
 server:
   port: 8080

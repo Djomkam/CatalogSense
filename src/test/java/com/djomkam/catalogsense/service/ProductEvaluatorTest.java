@@ -3,7 +3,6 @@ package com.djomkam.catalogsense.service;
 import com.djomkam.catalogsense.TestProducts;
 import com.djomkam.catalogsense.api.ProductPayload;
 import com.djomkam.catalogsense.api.VariantPayload;
-import com.djomkam.catalogsense.domain.Product;
 import com.djomkam.catalogsense.domain.Severity;
 import com.djomkam.catalogsense.validation.RequiredFieldsRule;
 import com.djomkam.catalogsense.validation.ValidationRule;
@@ -12,7 +11,8 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,10 +29,10 @@ class ProductEvaluatorTest {
         ProductPayload blankSku = new ProductPayload("   ", "Shoes", "Nike", "Apparel", BigDecimal.TEN, "USD", null, 1L, null);
 
         ProductOutcome outcomeNull = ProductEvaluator.evaluate(
-                nullSku, CATALOG, Map.of(), Map.of(), rules, NOW, new HashSet<>()
+                nullSku, CATALOG, Map.of(), Map.of(), rules, NOW
         );
         ProductOutcome outcomeBlank = ProductEvaluator.evaluate(
-                blankSku, CATALOG, Map.of(), Map.of(), rules, NOW, new HashSet<>()
+                blankSku, CATALOG, Map.of(), Map.of(), rules, NOW
         );
 
         assertThat(outcomeNull).isInstanceOf(ProductOutcome.Rejected.class);
@@ -47,42 +47,42 @@ class ProductEvaluatorTest {
     }
 
     @Test
-    @DisplayName("Duplicate SKU in batch returns Rejected; only first occurrence records DUPLICATE_SKU health issue")
+    @DisplayName("Duplicate SKU in batch is rejected with a DUPLICATE_SKU issue, and evaluation is deterministic")
     void duplicateSkuInBatch() {
         ProductPayload p1 = TestProducts.valid("SKU-DUP", 1);
         ProductPayload p2 = TestProducts.valid("SKU-DUP", 2);
+        Map<String, Long> duplicates = Map.of("SKU-DUP", 2L);
 
-        Map<String, Long> freq = Map.of("SKU-DUP", 2L);
-        Set<String> firstSeen = new HashSet<>();
+        ProductOutcome out1 = ProductEvaluator.evaluate(p1, CATALOG, duplicates, Map.of(), rules, NOW);
+        ProductOutcome out2 = ProductEvaluator.evaluate(p2, CATALOG, duplicates, Map.of(), rules, NOW);
 
-        ProductOutcome out1 = ProductEvaluator.evaluate(p1, CATALOG, freq, Map.of(), rules, NOW, firstSeen);
-        ProductOutcome out2 = ProductEvaluator.evaluate(p2, CATALOG, freq, Map.of(), rules, NOW, firstSeen);
-
-        assertThat(out1).isInstanceOf(ProductOutcome.Rejected.class);
-        ProductOutcome.Rejected r1 = (ProductOutcome.Rejected) out1;
-        assertThat(r1.issuesToRecord()).hasSize(1);
-        assertThat(r1.issuesToRecord().getFirst().getRule()).isEqualTo(ProductEvaluator.DUPLICATE_SKU);
-        assertThat(r1.issuesToRecord().getFirst().getSeverity()).isEqualTo(Severity.ERROR);
-
-        assertThat(out2).isInstanceOf(ProductOutcome.Rejected.class);
-        ProductOutcome.Rejected r2 = (ProductOutcome.Rejected) out2;
-        assertThat(r2.issuesToRecord()).isEmpty();
+        for (ProductOutcome out : List.of(out1, out2)) {
+            assertThat(out).isInstanceOf(ProductOutcome.Rejected.class);
+            ProductOutcome.Rejected r = (ProductOutcome.Rejected) out;
+            assertThat(r.reasons()).containsExactly("SKU appears 2 times in this batch; send it once.");
+            assertThat(r.issuesToRecord()).singleElement().satisfies(i -> {
+                assertThat(i.getRule()).isEqualTo(ProductEvaluator.DUPLICATE_SKU);
+                assertThat(i.getSeverity()).isEqualTo(Severity.ERROR);
+            });
+        }
+        // Same inputs, same result: no hidden state between calls.
+        assertThat(ProductEvaluator.evaluate(p1, CATALOG, duplicates, Map.of(), rules, NOW))
+                .usingRecursiveComparison().isEqualTo(out1);
     }
 
     @Test
     @DisplayName("Stale or identical version returns Stale outcome")
     void staleVersion() {
-        Product existing = new Product(CATALOG, "SKU-STALE");
-        existing.setVersion(5L);
+        Map<String, Long> stored = Map.of("SKU-STALE", 5L);
 
         ProductPayload stalePayload = TestProducts.withPrice("SKU-STALE", 4L, BigDecimal.TEN);
         ProductPayload samePayload = TestProducts.withPrice("SKU-STALE", 5L, BigDecimal.TEN);
 
         ProductOutcome outStale = ProductEvaluator.evaluate(
-                stalePayload, CATALOG, Map.of("SKU-STALE", 1L), Map.of("SKU-STALE", existing), rules, NOW, new HashSet<>()
+                stalePayload, CATALOG, Map.of(), stored, rules, NOW
         );
         ProductOutcome outSame = ProductEvaluator.evaluate(
-                samePayload, CATALOG, Map.of("SKU-STALE", 1L), Map.of("SKU-STALE", existing), rules, NOW, new HashSet<>()
+                samePayload, CATALOG, Map.of(), stored, rules, NOW
         );
 
         assertThat(outStale).isInstanceOf(ProductOutcome.Stale.class);
@@ -99,7 +99,7 @@ class ProductEvaluatorTest {
         ProductPayload invalid = new ProductPayload("SKU-ERR", null, "Nike", "Apparel", BigDecimal.TEN, "USD", null, 1L, null);
 
         ProductOutcome outcome = ProductEvaluator.evaluate(
-                invalid, CATALOG, Map.of("SKU-ERR", 1L), Map.of(), rules, NOW, new HashSet<>()
+                invalid, CATALOG, Map.of(), Map.of(), rules, NOW
         );
 
         assertThat(outcome).isInstanceOf(ProductOutcome.Rejected.class);
@@ -110,7 +110,7 @@ class ProductEvaluatorTest {
     }
 
     @Test
-    @DisplayName("Valid product with variants returns Accepted outcome with updated product entity")
+    @DisplayName("Valid product returns Accepted carrying the payload; no entity is created or changed")
     void validProductAccepted() {
         ProductPayload valid = new ProductPayload(
                 "SKU-OK", "Running Shoe", "Nike", "Shoes", BigDecimal.valueOf(120), "USD",
@@ -120,15 +120,14 @@ class ProductEvaluatorTest {
         );
 
         ProductOutcome outcome = ProductEvaluator.evaluate(
-                valid, CATALOG, Map.of("SKU-OK", 1L), Map.of(), rules, NOW, new HashSet<>()
+                valid, CATALOG, Map.of(), Map.of(), rules, NOW
         );
 
         assertThat(outcome).isInstanceOf(ProductOutcome.Accepted.class);
         ProductOutcome.Accepted accepted = (ProductOutcome.Accepted) outcome;
-        assertThat(accepted.product().getSku()).isEqualTo("SKU-OK");
-        assertThat(accepted.product().getName()).isEqualTo("Running Shoe");
-        assertThat(accepted.product().getVariants()).hasSize(2);
-        assertThat(accepted.product().isInStock()).isTrue();
+        assertThat(accepted.sku()).isEqualTo("SKU-OK");
+        assertThat(accepted.payload()).isSameAs(valid);
+        assertThat(accepted.issues()).isEmpty();
         assertThat(accepted.hasWarnings()).isFalse();
     }
 }

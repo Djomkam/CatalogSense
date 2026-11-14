@@ -29,17 +29,17 @@ public class CatalogController {
     static final int MAX_BATCH = 10_000;
     private static final String CATALOG_ID = "[A-Za-z0-9_-]{1,64}";
 
-    private final IngestionService ingestion;
-    private final HealthService health;
-    private final ProductQueryService products;
-    private final HealthIssueRepository issues;
+    private final IngestionService ingestionService;
+    private final HealthService healthService;
+    private final ProductQueryService productQueryService;
+    private final HealthIssueRepository healthIssueRepository;
 
     /** Full load: the body is the whole catalog. Products not in it are deleted. */
     @PutMapping("/products")
     public IngestionReport fullLoad(@PathVariable @Pattern(regexp = CATALOG_ID) String catalogId,
                                     @RequestBody List<ProductPayload> body) {
         checkSize(body);
-        return ingestion.ingest(catalogId, body, IngestionMode.FULL);
+        return ingestionService.ingest(catalogId, body, IngestionMode.FULL);
     }
 
     /** Partial update: only the products in the body are created or updated. */
@@ -47,25 +47,25 @@ public class CatalogController {
     public IngestionReport partialUpdate(@PathVariable @Pattern(regexp = CATALOG_ID) String catalogId,
                                          @RequestBody List<ProductPayload> body) {
         checkSize(body);
-        return ingestion.ingest(catalogId, body, IngestionMode.PARTIAL);
+        return ingestionService.ingest(catalogId, body, IngestionMode.PARTIAL);
     }
 
     @GetMapping("/products")
     public Page<ProductView> list(@PathVariable @Pattern(regexp = CATALOG_ID) String catalogId,
                                   @RequestParam(defaultValue = "0") @Min(0) int page,
                                   @RequestParam(defaultValue = "20") @Min(1) @Max(200) int size) {
-        return products.list(catalogId, page, size);
+        return productQueryService.list(catalogId, page, size);
     }
 
     @GetMapping("/products/{sku}")
     public ProductView get(@PathVariable @Pattern(regexp = CATALOG_ID) String catalogId, @PathVariable String sku) {
-        return products.get(catalogId, sku)
+        return productQueryService.get(catalogId, sku)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No product " + sku));
     }
 
     @GetMapping("/health")
     public HealthSummary health(@PathVariable @Pattern(regexp = CATALOG_ID) String catalogId) {
-        return health.summary(catalogId);
+        return healthService.summary(catalogId);
     }
 
     @GetMapping("/health/issues")
@@ -77,13 +77,13 @@ public class CatalogController {
         PageRequest pr = PageRequest.of(page, size);
         Page<com.djomkam.catalogsense.domain.HealthIssue> result;
         if (rule != null && !rule.isBlank() && severity != null) {
-            result = issues.findByCatalogIdAndRuleAndSeverityOrderByDetectedAtDesc(catalogId, rule, severity, pr);
+            result = healthIssueRepository.findByCatalogIdAndRuleAndSeverityOrderByDetectedAtDesc(catalogId, rule, severity, pr);
         } else if (rule != null && !rule.isBlank()) {
-            result = issues.findByCatalogIdAndRuleOrderByDetectedAtDesc(catalogId, rule, pr);
+            result = healthIssueRepository.findByCatalogIdAndRuleOrderByDetectedAtDesc(catalogId, rule, pr);
         } else if (severity != null) {
-            result = issues.findByCatalogIdAndSeverityOrderByDetectedAtDesc(catalogId, severity, pr);
+            result = healthIssueRepository.findByCatalogIdAndSeverityOrderByDetectedAtDesc(catalogId, severity, pr);
         } else {
-            result = issues.findByCatalogIdOrderByDetectedAtDesc(catalogId, pr);
+            result = healthIssueRepository.findByCatalogIdOrderByDetectedAtDesc(catalogId, pr);
         }
         return result.map(IssueView::from);
     }
