@@ -20,11 +20,11 @@ class ProductDocumentTest {
                 new ProductSnapshot.VariantSnapshot("TEE-BX", "Blue", " ", null, true),
                 new ProductSnapshot.VariantSnapshot("TEE-NO", null, "M", null, true)));
 
-        ProductDocument doc = ProductDocument.from(snapshot);
+        ProductDocument document = ProductDocument.from(snapshot);
 
-        assertThat(doc.id()).isEqualTo("demo:TEE");
-        assertThat(doc.colors()).containsExactly("Blue", "Red");
-        assertThat(doc.sizes()).containsExactly("M", "S");
-        assertThat(doc.version()).isEqualTo(3);
+        assertThat(document.documentId()).isEqualTo("demo:TEE");
+        assertThat(document.colors()).containsExactly("Blue", "Red");
+        assertThat(document.sizes()).containsExactly("M", "S");
+        assertThat(document.version()).isEqualTo(3);
     }
 }

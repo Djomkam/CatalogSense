@@ -1,5 +1,6 @@
 package com.djomkam.catalogsense.search;
 
+import com.djomkam.catalogsense.event.ProductEventMessage;
 import com.djomkam.catalogsense.event.ProductSnapshot;
 
 import java.math.BigDecimal;
@@ -10,6 +11,7 @@ import java.util.Objects;
 /**
  * What a product looks like in the search index: flat and denormalised for querying.
  * Variant colors and sizes are copied up to the product so they can be used as facets.
+ * The component names are the index field names (see {@link ProductFields}).
  */
 public record ProductDocument(
         String catalogId,
@@ -27,28 +29,24 @@ public record ProductDocument(
         List<String> sizes
 ) {
 
-    /** Same id as the Kafka message key, so one product is one document. */
-    public static String id(String catalogId, String sku) {
-        return catalogId + ":" + sku;
+    /** Same as the Kafka message key, so one product is exactly one document. */
+    public static String documentId(String catalogId, String sku) {
+        return ProductEventMessage.key(catalogId, sku);
     }
 
-    public String id() {
-        return id(catalogId, sku);
+    public String documentId() {
+        return documentId(catalogId, sku);
     }
 
-    public ProductDocument withCatalog(String otherCatalogId) {
-        return new ProductDocument(otherCatalogId, sku, name, brand, category, price, currency, imageUrl, inStock,
-                version, updatedAt, colors, sizes);
+    public static ProductDocument from(ProductSnapshot product) {
+        return new ProductDocument(product.catalogId(), product.sku(), product.name(), product.brand(),
+                product.category(), product.price(), product.currency(), product.imageUrl(), product.inStock(),
+                product.version(), product.updatedAt(),
+                distinctNonBlankSorted(product.variants().stream().map(ProductSnapshot.VariantSnapshot::color).toList()),
+                distinctNonBlankSorted(product.variants().stream().map(ProductSnapshot.VariantSnapshot::size).toList()));
     }
 
-    public static ProductDocument from(ProductSnapshot p) {
-        return new ProductDocument(p.catalogId(), p.sku(), p.name(), p.brand(), p.category(), p.price(),
-                p.currency(), p.imageUrl(), p.inStock(), p.version(), p.updatedAt(),
-                distinct(p.variants().stream().map(ProductSnapshot.VariantSnapshot::color).toList()),
-                distinct(p.variants().stream().map(ProductSnapshot.VariantSnapshot::size).toList()));
-    }
-
-    private static List<String> distinct(List<String> values) {
-        return values.stream().filter(Objects::nonNull).filter(v -> !v.isBlank()).distinct().sorted().toList();
+    private static List<String> distinctNonBlankSorted(List<String> values) {
+        return values.stream().filter(Objects::nonNull).filter(value -> !value.isBlank()).distinct().sorted().toList();
     }
 }

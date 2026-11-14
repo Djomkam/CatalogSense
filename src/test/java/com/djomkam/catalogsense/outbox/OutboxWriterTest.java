@@ -1,11 +1,13 @@
 package com.djomkam.catalogsense.outbox;
 
+import com.djomkam.catalogsense.event.ProductEventMessage;
+import com.djomkam.catalogsense.event.ProductEventType;
 import com.djomkam.catalogsense.TestProducts;
-import com.djomkam.catalogsense.domain.HealthIssueRepository;
-import com.djomkam.catalogsense.domain.ProductRepository;
+import com.djomkam.catalogsense.health.HealthIssueRepository;
+import com.djomkam.catalogsense.catalog.ProductRepository;
 import com.djomkam.catalogsense.event.ProductsDeletedEvent;
-import com.djomkam.catalogsense.service.IngestionMode;
-import com.djomkam.catalogsense.service.IngestionService;
+import com.djomkam.catalogsense.ingestion.IngestionMode;
+import com.djomkam.catalogsense.ingestion.IngestionService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,10 +19,12 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Proves the outbox rows commit and roll back together with the catalog change. */
@@ -30,44 +34,44 @@ class OutboxWriterTest {
 
     private static final String CATALOG = "outbox-store";
 
-    @Autowired IngestionService ingestion;
-    @Autowired OutboxWriter writer;
-    @Autowired OutboxEventRepository outbox;
-    @Autowired ProductRepository products;
-    @Autowired HealthIssueRepository issues;
-    @Autowired TransactionTemplate tx;
+    @Autowired IngestionService ingestionService;
+    @Autowired OutboxWriter outboxWriter;
+    @Autowired OutboxEventRepository outboxEventRepository;
+    @Autowired ProductRepository productRepository;
+    @Autowired HealthIssueRepository healthIssueRepository;
+    @Autowired TransactionTemplate transactionTemplate;
     @Autowired ObjectMapper objectMapper;
     @Autowired MeterRegistry meterRegistry;
 
     @BeforeEach
-    void clean() {
-        outbox.deleteAll();
-        issues.deleteAll();
-        products.deleteAll();
+    void startFromEmptyTables() {
+        outboxEventRepository.deleteAll();
+        healthIssueRepository.deleteAll();
+        productRepository.deleteAll();
     }
 
     @Test
     void committedIngestionWritesOneOutboxRowPerChangedProduct() throws Exception {
-        ingestion.ingest(CATALOG, List.of(TestProducts.valid("A", 1), TestProducts.valid("B", 1)), IngestionMode.FULL);
-        ingestion.ingest(CATALOG, List.of(TestProducts.valid("A", 2)), IngestionMode.FULL); // updates A, deletes B
+        ingestionService.ingest(CATALOG, List.of(TestProducts.valid("A", 1), TestProducts.valid("B", 1)), IngestionMode.FULL);
+        ingestionService.ingest(CATALOG, List.of(TestProducts.valid("A", 2)), IngestionMode.FULL); // updates A, deletes B
 
-        List<OutboxEvent> rows = outbox.findAll().stream()
-                .sorted((x, y) -> Long.compare(x.getId(), y.getId())).toList();
+        List<OutboxEvent> outboxEvents = outboxEventRepository.findAll().stream()
+                .sorted(Comparator.comparing(OutboxEvent::getId)).toList();
 
-        assertThat(rows).extracting(OutboxEvent::getEventType, OutboxEvent::getMessageKey).containsExactly(
-                org.assertj.core.groups.Tuple.tuple(ProductEventMessage.UPSERTED, CATALOG + ":A"),
-                org.assertj.core.groups.Tuple.tuple(ProductEventMessage.UPSERTED, CATALOG + ":B"),
-                org.assertj.core.groups.Tuple.tuple(ProductEventMessage.UPSERTED, CATALOG + ":A"),
-                org.assertj.core.groups.Tuple.tuple(ProductEventMessage.DELETED, CATALOG + ":B"));
-        assertThat(rows).allSatisfy(r -> assertThat(r.getPublishedAt()).isNull());
+        assertThat(outboxEvents).extracting(OutboxEvent::getEventType, OutboxEvent::getMessageKey).containsExactly(
+                tuple(ProductEventType.UPSERTED, CATALOG + ":A"),
+                tuple(ProductEventType.UPSERTED, CATALOG + ":B"),
+                tuple(ProductEventType.UPSERTED, CATALOG + ":A"),
+                tuple(ProductEventType.DELETED, CATALOG + ":B"));
+        assertThat(outboxEvents).allSatisfy(outboxEvent -> assertThat(outboxEvent.getPublishedAt()).isNull());
 
         // The payload is a full snapshot (variants included), readable without any JPA session.
-        ProductEventMessage update = objectMapper.readValue(rows.get(2).getPayload(), ProductEventMessage.class);
+        ProductEventMessage update = objectMapper.readValue(outboxEvents.get(2).getPayload(), ProductEventMessage.class);
         assertThat(update.version()).isEqualTo(2L);
         assertThat(update.product().variants()).singleElement()
-                .satisfies(v -> assertThat(v.sku()).isEqualTo("A-9"));
+                .satisfies(variant -> assertThat(variant.sku()).isEqualTo("A-9"));
 
-        ProductEventMessage delete = objectMapper.readValue(rows.get(3).getPayload(), ProductEventMessage.class);
+        ProductEventMessage delete = objectMapper.readValue(outboxEvents.get(3).getPayload(), ProductEventMessage.class);
         assertThat(delete.product()).isNull();
         assertThat(delete.sku()).isEqualTo("B");
     }
@@ -76,13 +80,13 @@ class OutboxWriterTest {
     void rolledBackIngestionLeavesNoOutboxRowAndNoMetric() {
         double before = ingestionCount();
 
-        tx.executeWithoutResult(status -> {
-            ingestion.ingest(CATALOG, List.of(TestProducts.valid("A", 1)), IngestionMode.PARTIAL);
+        transactionTemplate.executeWithoutResult(status -> {
+            ingestionService.ingest(CATALOG, List.of(TestProducts.valid("A", 1)), IngestionMode.PARTIAL);
             status.setRollbackOnly();
         });
 
-        assertThat(outbox.count()).isZero();
-        assertThat(products.countByCatalogId(CATALOG)).isZero();
+        assertThat(outboxEventRepository.count()).isZero();
+        assertThat(productRepository.countByCatalogId(CATALOG)).isZero();
         assertThat(ingestionCount()).isEqualTo(before); // AFTER_COMMIT listener did not run
     }
 
@@ -90,14 +94,14 @@ class OutboxWriterTest {
     void committedIngestionIsCountedOnceAfterCommit() {
         double before = ingestionCount();
 
-        ingestion.ingest(CATALOG, List.of(TestProducts.valid("A", 1)), IngestionMode.PARTIAL);
+        ingestionService.ingest(CATALOG, List.of(TestProducts.valid("A", 1)), IngestionMode.PARTIAL);
 
         assertThat(ingestionCount()).isEqualTo(before + 1);
     }
 
     @Test
     void writerRefusesToRunOutsideATransaction() {
-        assertThatThrownBy(() -> writer.on(new ProductsDeletedEvent(CATALOG, Set.of("X"), Instant.now())))
+        assertThatThrownBy(() -> outboxWriter.onProductsDeleted(new ProductsDeletedEvent(CATALOG, Set.of("X"), Instant.now())))
                 .isInstanceOf(IllegalTransactionStateException.class);
     }
 

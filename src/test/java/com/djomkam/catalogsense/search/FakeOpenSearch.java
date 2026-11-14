@@ -13,19 +13,19 @@ import java.util.function.Function;
  * A tiny HTTP server that answers like OpenSearch with canned JSON. It lets the tests exercise the
  * real client (serialization, typed aggregation keys, error mapping) without Docker.
  */
-final class FakeOpenSearch implements AutoCloseable {
+public final class FakeOpenSearch implements AutoCloseable {
 
-    record Request(String method, String uri, String body) {
+    public record Request(String method, String uri, String body) {
     }
 
-    record Response(int status, String body) {
+    public record Response(int status, String body) {
     }
 
     private final HttpServer server;
     private final List<Request> requests = new CopyOnWriteArrayList<>();
-    private volatile Function<Request, Response> responder = r -> new Response(200, "{}");
+    private volatile Function<Request, Response> responder = request -> new Response(200, "{}");
 
-    FakeOpenSearch() throws IOException {
+    public FakeOpenSearch() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
@@ -45,15 +45,15 @@ final class FakeOpenSearch implements AutoCloseable {
         server.start();
     }
 
-    String url() {
+    public String url() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
-    void respond(Function<Request, Response> responder) {
+    public void respond(Function<Request, Response> responder) {
         this.responder = responder;
     }
 
-    List<Request> requests() {
+    public List<Request> requests() {
         return requests;
     }
 

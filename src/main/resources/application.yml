@@ -14,6 +14,11 @@ spring:
       hibernate.order_inserts: true
   flyway:
     enabled: true
+  data:
+    web:
+      pageable:
+        # Stable page JSON: {"content": [...], "page": {"size", "number", "totalElements", "totalPages"}}
+        serialization-mode: via-dto
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
     producer:
@@ -42,7 +47,7 @@ catalogsense:
   search:
     enabled: true
     url: ${OPENSEARCH_URL:http://localhost:9200}
-    index: catalogsense-products
+    index-alias: catalogsense-products   # alias over catalogsense-products-v1, -v2, ... (swapped by a reindex)
     consumer:
       group-id: catalogsense-search-indexer
       retries: 3

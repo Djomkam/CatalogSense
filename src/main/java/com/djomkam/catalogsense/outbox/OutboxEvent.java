@@ -1,12 +1,20 @@
 package com.djomkam.catalogsense.outbox;
 
-import jakarta.persistence.*;
+import com.djomkam.catalogsense.event.ProductEventType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
+/** One event waiting to be (or already) published to Kafka. Written in the same transaction as the change. */
 @Entity
 @Table(name = "outbox_event")
 @Getter
@@ -23,8 +31,9 @@ public class OutboxEvent {
     @Column(name = "event_id", nullable = false, updatable = false)
     private String eventId;
 
+    @Convert(converter = ProductEventTypeConverter.class)
     @Column(name = "event_type", nullable = false, updatable = false)
-    private String eventType;
+    private ProductEventType eventType;
 
     @Column(name = "catalog_id", nullable = false, updatable = false)
     private String catalogId;
@@ -48,7 +57,7 @@ public class OutboxEvent {
     @Column(name = "last_error")
     private String lastError;
 
-    public OutboxEvent(String eventId, String eventType, String catalogId, String messageKey,
+    public OutboxEvent(String eventId, ProductEventType eventType, String catalogId, String messageKey,
                        String payload, Instant createdAt) {
         this.eventId = eventId;
         this.eventType = eventType;
@@ -58,15 +67,21 @@ public class OutboxEvent {
         this.createdAt = createdAt;
     }
 
-    public void markPublished(Instant when) {
+    public void markPublished(Instant publishedAt) {
         this.attempts++;
-        this.publishedAt = when;
+        this.publishedAt = publishedAt;
         this.lastError = null;
     }
 
     public void markFailed(String error) {
         this.attempts++;
-        this.lastError = error == null ? null
-                : error.length() <= MAX_ERROR_LENGTH ? error : error.substring(0, MAX_ERROR_LENGTH);
+        this.lastError = truncate(error);
+    }
+
+    private static String truncate(String error) {
+        if (error == null || error.length() <= MAX_ERROR_LENGTH) {
+            return error;
+        }
+        return error.substring(0, MAX_ERROR_LENGTH);
     }
 }
